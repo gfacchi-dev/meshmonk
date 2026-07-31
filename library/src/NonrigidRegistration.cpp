@@ -70,8 +70,9 @@ void NonrigidRegistration::update() {
   // # floating ones are taken from its starting pose.
   VecDynFloat floatingAreas;
   VecDynFloat targetAreas;
-  const bool useAreaWeighting =
-      (_inTargetFaces != NULL) && (_inFloatingFaces != NULL);
+  // Disabled on this branch so the point-to-surface experiment is measured on
+  // its own rather than on top of area weighting.
+  const bool useAreaWeighting = false;
   if (useAreaWeighting) {
     floatingAreas = compute_vertex_areas(*_ioFloatingFeatures, *_inFloatingFaces);
     targetAreas = compute_vertex_areas(*_inTargetFeatures, *_inTargetFaces);
@@ -80,6 +81,9 @@ void NonrigidRegistration::update() {
   // # Set up the filters
   // ## Correspondence Filter
   std::unique_ptr<BaseCorrespondenceFilter> correspondenceFilter;
+  // Non-owning alias, set only for the non-symmetric filter, which is the one
+  // that can take target connectivity.
+  CorrespondenceFilter *plainFilter = NULL;
 
   if (_symmetric) {
     auto *f = new SymmetricCorrespondenceFilter();
@@ -88,18 +92,26 @@ void NonrigidRegistration::update() {
       f->set_areas(&floatingAreas, &targetAreas);
     }
     correspondenceFilter.reset(f);
+    plainFilter = NULL;
   } else {
     auto *f = new CorrespondenceFilter();
     f->set_parameters(_numNeighbours, _flagThreshold);
     if (useAreaWeighting) {
       f->set_source_areas(&targetAreas);
     }
+    plainFilter = f;
     correspondenceFilter.reset(f);
   }
   correspondenceFilter->set_floating_input(_ioFloatingFeatures,
                                            _inFloatingFlags);
   correspondenceFilter->set_target_input(_inTargetFeatures, _inTargetFlags);
   correspondenceFilter->set_output(&correspondingFeatures, &correspondingFlags);
+
+  // # Target connectivity enables point-to-surface correspondences. It has to
+  // # come after set_target_input(), which is what the adjacency is built over.
+  if (plainFilter != NULL && _inTargetFaces != NULL) {
+    plainFilter->set_target_faces(_inTargetFaces);
+  }
 
   // ## Inlier Filter
   VecDynFloat floatingWeights = VecDynFloat::Ones(numFloatingVertices);

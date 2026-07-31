@@ -1,5 +1,7 @@
 #include "CorrespondenceFilter.hpp"
 #include "meshmonk/profiling.hpp"
+#include <algorithm>
+#include <limits>
 
 namespace registration {
 
@@ -44,6 +46,208 @@ void CorrespondenceFilter::set_parameters(const size_t numNeighbours,
 void CorrespondenceFilter::set_affinity_normalization(
     const bool normalizeAffinity) {
   _normalizeAffinity = normalizeAffinity;
+}
+
+void CorrespondenceFilter::set_target_faces(const FacesMat *const inTargetFaces) {
+  _inTargetFaces = inTargetFaces;
+  _build_vertex_face_adjacency();
+}
+
+void CorrespondenceFilter::_build_vertex_face_adjacency() {
+  /*
+  # GOAL
+  Group target face ids by the vertices they touch (CSR layout), so that given
+  a nearest vertex we can immediately gather the triangles around it as
+  candidates for the closest-point projection.
+  */
+  _vertexFaceOffsets.clear();
+  _vertexFaceIndices.clear();
+  if (_inTargetFaces == NULL || _inTargetFeatures == NULL) {
+    return;
+  }
+
+  const size_t numVertices = _inTargetFeatures->rows();
+  const size_t numFaces = _inTargetFaces->rows();
+
+  // # Count incident faces per vertex, then prefix-sum into offsets.
+  std::vector<int> counts(numVertices, 0);
+  for (size_t f = 0; f < numFaces; f++) {
+    for (int c = 0; c < 3; c++) {
+      const int v = (*_inTargetFaces)(f, c);
+      if (v >= 0 && v < (int)numVertices) {
+        counts[v]++;
+      }
+    }
+  }
+  _vertexFaceOffsets.resize(numVertices + 1, 0);
+  for (size_t v = 0; v < numVertices; v++) {
+    _vertexFaceOffsets[v + 1] = _vertexFaceOffsets[v] + counts[v];
+  }
+  _vertexFaceIndices.resize(_vertexFaceOffsets[numVertices]);
+
+  // # Fill, reusing counts as a per-vertex write cursor.
+  std::vector<int> cursor(_vertexFaceOffsets.begin(),
+                          _vertexFaceOffsets.end() - 1);
+  for (size_t f = 0; f < numFaces; f++) {
+    for (int c = 0; c < 3; c++) {
+      const int v = (*_inTargetFaces)(f, c);
+      if (v >= 0 && v < (int)numVertices) {
+        _vertexFaceIndices[cursor[v]++] = (int)f;
+      }
+    }
+  }
+}
+
+namespace {
+
+// Closest point to `p` on triangle (a,b,c), after Ericson, Real-Time Collision
+// Detection §5.1.5. Also returns the barycentric coordinates so per-vertex
+// attributes (normals, flags) can be interpolated at that point.
+inline Vec3Float closest_point_on_triangle(const Vec3Float &p,
+                                           const Vec3Float &a,
+                                           const Vec3Float &b,
+                                           const Vec3Float &c, float &outU,
+                                           float &outV, float &outW) {
+  const Vec3Float ab = b - a;
+  const Vec3Float ac = c - a;
+  const Vec3Float ap = p - a;
+  const float d1 = ab.dot(ap);
+  const float d2 = ac.dot(ap);
+  if (d1 <= 0.0f && d2 <= 0.0f) {
+    outU = 1.0f; outV = 0.0f; outW = 0.0f;
+    return a;
+  }
+
+  const Vec3Float bp = p - b;
+  const float d3 = ab.dot(bp);
+  const float d4 = ac.dot(bp);
+  if (d3 >= 0.0f && d4 <= d3) {
+    outU = 0.0f; outV = 1.0f; outW = 0.0f;
+    return b;
+  }
+
+  const float vc = d1 * d4 - d3 * d2;
+  if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f) {
+    const float v = d1 / (d1 - d3);
+    outU = 1.0f - v; outV = v; outW = 0.0f;
+    return a + v * ab;
+  }
+
+  const Vec3Float cp = p - c;
+  const float d5 = ab.dot(cp);
+  const float d6 = ac.dot(cp);
+  if (d6 >= 0.0f && d5 <= d6) {
+    outU = 0.0f; outV = 0.0f; outW = 1.0f;
+    return c;
+  }
+
+  const float vb = d5 * d2 - d1 * d6;
+  if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f) {
+    const float w = d2 / (d2 - d6);
+    outU = 1.0f - w; outV = 0.0f; outW = w;
+    return a + w * ac;
+  }
+
+  const float va = d3 * d6 - d5 * d4;
+  if (va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f) {
+    const float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+    outU = 0.0f; outV = 1.0f - w; outW = w;
+    return b + w * (c - b);
+  }
+
+  const float denom = 1.0f / (va + vb + vc);
+  const float v = vb * denom;
+  const float w = vc * denom;
+  outU = 1.0f - v - w; outV = v; outW = w;
+  return a + ab * v + ac * w;
+}
+
+} // namespace
+
+void CorrespondenceFilter::_update_point_to_surface_correspondences() {
+  /*
+  # GOAL
+  Give each floating vertex the closest point on the target *surface* instead
+  of a distance-weighted blend of nearby target vertices.
+
+  A blend of vertices depends on how many vertices happen to sit nearby, so
+  retessellating the same surface moves the correspondence. Projecting onto the
+  triangles removes that: the triangles describe the same surface no matter how
+  finely it is subdivided.
+
+  Candidate triangles are those incident to the k nearest target vertices,
+  which is where the true closest point lies except in pathological cases.
+  */
+  const MatDynInt neighbourIndices = _neighbourFinder.get_indices();
+  const size_t numTargetVertices = _inTargetFeatures->rows();
+
+  for (size_t i = 0; i < _numFloatingElements; i++) {
+    const Vec3Float p = _inFloatingFeatures->row(i).head(3);
+
+    float bestDistSq = std::numeric_limits<float>::max();
+    Vec3Float bestPoint = p;
+    int bestFace = -1;
+    float bestU = 1.0f, bestV = 0.0f, bestW = 0.0f;
+
+    for (size_t j = 0; j < _numNeighbours; j++) {
+      const int nb = neighbourIndices(i, j);
+      if (nb < 0 || nb >= (int)numTargetVertices) {
+        continue;
+      }
+      const int begin = _vertexFaceOffsets[nb];
+      const int end = _vertexFaceOffsets[nb + 1];
+      for (int fi = begin; fi < end; fi++) {
+        const int f = _vertexFaceIndices[fi];
+        const int i0 = (*_inTargetFaces)(f, 0);
+        const int i1 = (*_inTargetFaces)(f, 1);
+        const int i2 = (*_inTargetFaces)(f, 2);
+        const Vec3Float a = _inTargetFeatures->row(i0).head(3);
+        const Vec3Float b = _inTargetFeatures->row(i1).head(3);
+        const Vec3Float c = _inTargetFeatures->row(i2).head(3);
+        float u, v, w;
+        const Vec3Float q = closest_point_on_triangle(p, a, b, c, u, v, w);
+        const float distSq = (q - p).squaredNorm();
+        if (distSq < bestDistSq) {
+          bestDistSq = distSq;
+          bestPoint = q;
+          bestFace = f;
+          bestU = u; bestV = v; bestW = w;
+        }
+      }
+    }
+
+    if (bestFace < 0) {
+      // # No incident triangles (isolated vertices): fall back to the blended
+      // # correspondence already computed from the affinity matrix.
+      continue;
+    }
+
+    const int i0 = (*_inTargetFaces)(bestFace, 0);
+    const int i1 = (*_inTargetFaces)(bestFace, 1);
+    const int i2 = (*_inTargetFaces)(bestFace, 2);
+
+    // # Interpolate the normal at the projected point.
+    Vec3Float n = bestU * Vec3Float(_inTargetFeatures->row(i0).tail(3)) +
+                  bestV * Vec3Float(_inTargetFeatures->row(i1).tail(3)) +
+                  bestW * Vec3Float(_inTargetFeatures->row(i2).tail(3));
+    const float nNorm = n.norm();
+    if (nNorm > 1e-8f) {
+      n /= nNorm;
+    }
+
+    (*_ioCorrespondingFeatures)(i, 0) = bestPoint[0];
+    (*_ioCorrespondingFeatures)(i, 1) = bestPoint[1];
+    (*_ioCorrespondingFeatures)(i, 2) = bestPoint[2];
+    (*_ioCorrespondingFeatures)(i, 3) = n[0];
+    (*_ioCorrespondingFeatures)(i, 4) = n[1];
+    (*_ioCorrespondingFeatures)(i, 5) = n[2];
+
+    // # A correspondence is only as trustworthy as the triangle it landed on,
+    // # so require all three of its vertices to be flagged valid.
+    const float flag = std::min({(*_inTargetFlags)[i0], (*_inTargetFlags)[i1],
+                                 (*_inTargetFlags)[i2]});
+    (*_ioCorrespondingFlags)[i] = (flag > _flagThreshold) ? 1.0f : 0.0f;
+  }
 }
 
 void CorrespondenceFilter::_update_affinity() {
@@ -167,6 +371,12 @@ void CorrespondenceFilter::update() {
 
       // ### Restore the affinity matrix
       _affinity = affinityCopy;
+    }
+
+    // ## Refine the blended correspondences into closest points on the target
+    // ## surface, which does not depend on how the target was tessellated.
+    if (_inTargetFaces != NULL && !_vertexFaceOffsets.empty()) {
+      _update_point_to_surface_correspondences();
     }
   } else {
     /*
