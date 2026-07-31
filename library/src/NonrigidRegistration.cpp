@@ -64,6 +64,19 @@ void NonrigidRegistration::update() {
       FeatureMat::Zero(numFloatingVertices, registration::NUM_FEATURES);
   VecDynFloat correspondingFlags = VecDynFloat::Zero(numFloatingVertices);
 
+  // # Per-vertex surface areas, so correspondences weight surface rather than
+  // # vertex count (see compute_vertex_areas). Both meshes keep their
+  // # connectivity throughout, so these are computed once up front; the
+  // # floating ones are taken from its starting pose.
+  VecDynFloat floatingAreas;
+  VecDynFloat targetAreas;
+  const bool useAreaWeighting =
+      (_inTargetFaces != NULL) && (_inFloatingFaces != NULL);
+  if (useAreaWeighting) {
+    floatingAreas = compute_vertex_areas(*_ioFloatingFeatures, *_inFloatingFaces);
+    targetAreas = compute_vertex_areas(*_inTargetFeatures, *_inTargetFaces);
+  }
+
   // # Set up the filters
   // ## Correspondence Filter
   std::unique_ptr<BaseCorrespondenceFilter> correspondenceFilter;
@@ -71,10 +84,16 @@ void NonrigidRegistration::update() {
   if (_symmetric) {
     auto *f = new SymmetricCorrespondenceFilter();
     f->set_parameters(_numNeighbours, _flagThreshold, _equalizePushPull);
+    if (useAreaWeighting) {
+      f->set_areas(&floatingAreas, &targetAreas);
+    }
     correspondenceFilter.reset(f);
   } else {
     auto *f = new CorrespondenceFilter();
     f->set_parameters(_numNeighbours, _flagThreshold);
+    if (useAreaWeighting) {
+      f->set_source_areas(&targetAreas);
+    }
     correspondenceFilter.reset(f);
   }
   correspondenceFilter->set_floating_input(_ioFloatingFeatures,

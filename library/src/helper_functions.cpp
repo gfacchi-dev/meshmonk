@@ -52,6 +52,74 @@ void fuse_affinities(SparseMat &ioAffinity1, const SparseMat &inAffinity2) {
   normalize_sparse_matrix(ioAffinity1);
 }
 
+VecDynFloat compute_vertex_areas(const FeatureMat &inFeatures,
+                                 const FacesMat &inFaces) {
+  /*
+  # GOAL
+  Barycentric ("lumped mass") area of each vertex: one third of the summed
+  area of its incident triangles. This is the surface measure a vertex stands
+  for, and is what turns an affinity into a surface integral rather than a
+  point count -- so correspondences stop depending on how densely the target
+  happens to be sampled.
+
+  Normalized to mean 1.0, so it is a pure re-weighting and leaves the overall
+  affinity scale (and therefore existing parameter ranges) untouched.
+  */
+  const size_t numVertices = inFeatures.rows();
+  VecDynFloat areas = VecDynFloat::Zero(numVertices);
+
+  for (int f = 0; f < inFaces.rows(); f++) {
+    const int i0 = inFaces(f, 0);
+    const int i1 = inFaces(f, 1);
+    const int i2 = inFaces(f, 2);
+    if (i0 < 0 || i1 < 0 || i2 < 0)
+      continue;
+    if (i0 >= (int)numVertices || i1 >= (int)numVertices ||
+        i2 >= (int)numVertices)
+      continue;
+
+    const Eigen::Vector3f p0 = inFeatures.row(i0).head(3);
+    const Eigen::Vector3f p1 = inFeatures.row(i1).head(3);
+    const Eigen::Vector3f p2 = inFeatures.row(i2).head(3);
+    const float area = 0.5f * ((p1 - p0).cross(p2 - p0)).norm();
+    const float third = area / 3.0f;
+    areas[i0] += third;
+    areas[i1] += third;
+    areas[i2] += third;
+  }
+
+  // # Isolated vertices carry no area; give them the mean so they neither
+  // # dominate nor vanish.
+  const float mean = (numVertices > 0) ? areas.sum() / float(numVertices) : 0.0f;
+  if (!(mean > 0.0f)) {
+    return VecDynFloat::Ones(numVertices);
+  }
+  for (size_t i = 0; i < numVertices; i++) {
+    if (!(areas[i] > 0.0f)) {
+      areas[i] = mean;
+    }
+  }
+  areas /= mean;
+  return areas;
+}
+
+void scale_sparse_matrix_rows(SparseMat &ioMat, const VecDynFloat &inRowScale) {
+  /*
+  # GOAL
+  Multiply row i of ioMat by inRowScale[i], giving each target vertex a say
+  proportional to the surface area it represents rather than one vote each
+  regardless of how finely that area was tessellated.
+  */
+  for (size_t i = 0; i < ioMat.outerSize(); i++) {
+    for (SparseMat::InnerIterator innerIt(ioMat, i); innerIt; ++innerIt) {
+      const int row = innerIt.row();
+      if (row < inRowScale.size()) {
+        innerIt.valueRef() *= inRowScale[row];
+      }
+    }
+  }
+}
+
 void normalize_sparse_matrix(SparseMat &ioMat) {
   /*
   # GOAL

@@ -226,6 +226,7 @@ nonrigid_registration(Eigen::Ref<const FeatureMat> floating_features,
   FeatureMat floating_copy = floating_features;
   FeatureMat target_copy = target_features;
   FacesMat floating_faces_copy = floating_faces;
+  FacesMat target_faces_copy = target_faces;
   VecDynFloat floating_flags_copy = floating_flags;
   VecDynFloat target_flags_copy = target_flags;
 
@@ -254,6 +255,7 @@ nonrigid_registration(Eigen::Ref<const FeatureMat> floating_features,
   registration::NonrigidRegistration registrator;
   registrator.set_input(&floating_copy, &target_copy, &floating_faces_copy,
                         &floating_flags_copy, &target_flags_copy);
+  registrator.set_target_faces(&target_faces_copy);
   registrator.set_parameters(
       params.correspondences.symmetric,
       (size_t)params.correspondences.num_neighbours,

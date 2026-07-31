@@ -100,6 +100,14 @@ void CorrespondenceFilter::_update_affinity() {
       float orientationWeight = dotProduct / 2.0f + 0.5f;
       affinityElement *= orientationWeight;
 
+      // ### Incorporate the surface area this neighbour represents, so that a
+      // ### finely tessellated patch does not outvote a coarsely tessellated
+      // ### one covering the same amount of surface.
+      if (_inSourceAreas != NULL &&
+          neighbourIndex < (int)_inSourceAreas->size()) {
+        affinityElement *= (*_inSourceAreas)[neighbourIndex];
+      }
+
       // ### Check for numerical stability (the affinity elements will be
       // ### normalized later, so dividing by a sum of tiny elements might
       // ### go wrong.

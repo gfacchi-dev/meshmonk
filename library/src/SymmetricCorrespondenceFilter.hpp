@@ -63,6 +63,16 @@ public:
                         const VecDynFloat *const inTargetFlags);
   void set_parameters(const size_t numNeighbours, const float flagThreshold,
                       const bool _equalizePushPull);
+  // Per-vertex surface areas for both meshes. When set, the pull direction
+  // weights each target vertex by the area it represents instead of letting
+  // every vertex cast one equal vote -- otherwise a finely tessellated patch
+  // pulls harder than a coarse one covering the same surface, which is what
+  // makes the result depend on sampling. NULL keeps the original behaviour.
+  void set_areas(const VecDynFloat *const inFloatingAreas,
+                 const VecDynFloat *const inTargetAreas) {
+    _inFloatingAreas = inFloatingAreas;
+    _inTargetAreas = inTargetAreas;
+  }
   void update();
 
 protected:
@@ -73,6 +83,10 @@ private:
 
   // # Parameters
   bool _equalizePushPull = false;
+
+  // # Optional per-vertex surface areas (NULL = unweighted / original)
+  const VecDynFloat *_inFloatingAreas = NULL;
+  const VecDynFloat *_inTargetAreas = NULL;
 
   // # Internal functions
   // ## Function to update the internal push and pull correspondence filters

@@ -46,6 +46,12 @@ public:
                  const FacesMat *const inFloatingFaces,
                  const VecDynFloat *const inFloatingFlags,
                  const VecDynFloat *const inTargetFlags);
+  // Target connectivity, used only to derive per-vertex surface areas so that
+  // correspondences weight surface rather than vertex count. Optional: without
+  // it, registration keeps the original point-count weighting.
+  void set_target_faces(const FacesMat *const inTargetFaces) {
+    _inTargetFaces = inTargetFaces;
+  }
   void set_parameters(bool symmetric, size_t numNeighbours, float flagThreshold,
                       bool equalizePushPull, float kappaa,
                       bool inlierUseOrientation, size_t numIterations,
@@ -78,6 +84,7 @@ private:
   FeatureMat *_ioFloatingFeatures = NULL;
   const FeatureMat *_inTargetFeatures = NULL;
   const FacesMat *_inFloatingFaces;
+  const FacesMat *_inTargetFaces = NULL;
   const VecDynFloat *_inFloatingFlags = NULL;
   const VecDynFloat *_inTargetFlags = NULL;
 
