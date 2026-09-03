@@ -177,9 +177,27 @@ void CorrespondenceFilter::_update_point_to_surface_correspondences() {
 
   Candidate triangles are those incident to the k nearest target vertices,
   which is where the true closest point lies except in pathological cases.
+
+  The result is written twice, to the corresponding features directly and to
+  the affinity matrix as barycentric weights. The direct write is what the
+  non-symmetric path consumes. The affinity rebuild is what makes this usable
+  from SymmetricCorrespondenceFilter, which fuses its push and pull filters
+  through get_affinity() and never looks at their features -- so without it,
+  a symmetric registration would compute point-to-surface and discard it.
+
+  The two agree by construction: a closest point on a triangle *is* the
+  barycentric combination u*a + v*b + w*c of the triangle's vertices, so a
+  three-entry affinity row reproduces it exactly, normals included, since
+  features carry position and normal in the same row.
   */
   const MatDynInt neighbourIndices = _neighbourFinder.get_indices();
   const size_t numTargetVertices = _inTargetFeatures->rows();
+
+  // Rows that found no triangle keep their blended affinity, so seed the
+  // triplet list from the existing matrix and overwrite only what is resolved.
+  std::vector<Triplet> affinityElements;
+  affinityElements.reserve(3 * _numFloatingElements);
+  std::vector<bool> resolved(_numFloatingElements, false);
 
   for (size_t i = 0; i < _numFloatingElements; i++) {
     const Vec3Float p = _inFloatingFeatures->row(i).head(3);
@@ -226,28 +244,49 @@ void CorrespondenceFilter::_update_point_to_surface_correspondences() {
     const int i1 = (*_inTargetFaces)(bestFace, 1);
     const int i2 = (*_inTargetFaces)(bestFace, 2);
 
-    // # Interpolate the normal at the projected point.
-    Vec3Float n = bestU * Vec3Float(_inTargetFeatures->row(i0).tail(3)) +
-                  bestV * Vec3Float(_inTargetFeatures->row(i1).tail(3)) +
-                  bestW * Vec3Float(_inTargetFeatures->row(i2).tail(3));
-    const float nNorm = n.norm();
-    if (nNorm > 1e-8f) {
-      n /= nNorm;
+    // # Features are only written when a consumer attached an output buffer.
+    // # The symmetric filter's sub-filters have none and read the affinity.
+    if (_ioCorrespondingFeatures != NULL) {
+      // # Interpolate the normal at the projected point.
+      Vec3Float n = bestU * Vec3Float(_inTargetFeatures->row(i0).tail(3)) +
+                    bestV * Vec3Float(_inTargetFeatures->row(i1).tail(3)) +
+                    bestW * Vec3Float(_inTargetFeatures->row(i2).tail(3));
+      const float nNorm = n.norm();
+      if (nNorm > 1e-8f) {
+        n /= nNorm;
+      }
+
+      (*_ioCorrespondingFeatures)(i, 0) = bestPoint[0];
+      (*_ioCorrespondingFeatures)(i, 1) = bestPoint[1];
+      (*_ioCorrespondingFeatures)(i, 2) = bestPoint[2];
+      (*_ioCorrespondingFeatures)(i, 3) = n[0];
+      (*_ioCorrespondingFeatures)(i, 4) = n[1];
+      (*_ioCorrespondingFeatures)(i, 5) = n[2];
+
+      // # A correspondence is only as trustworthy as the triangle it landed
+      // # on, so require all three of its vertices to be flagged valid.
+      const float flag = std::min({(*_inTargetFlags)[i0], (*_inTargetFlags)[i1],
+                                   (*_inTargetFlags)[i2]});
+      (*_ioCorrespondingFlags)[i] = (flag > _flagThreshold) ? 1.0f : 0.0f;
     }
 
-    (*_ioCorrespondingFeatures)(i, 0) = bestPoint[0];
-    (*_ioCorrespondingFeatures)(i, 1) = bestPoint[1];
-    (*_ioCorrespondingFeatures)(i, 2) = bestPoint[2];
-    (*_ioCorrespondingFeatures)(i, 3) = n[0];
-    (*_ioCorrespondingFeatures)(i, 4) = n[1];
-    (*_ioCorrespondingFeatures)(i, 5) = n[2];
-
-    // # A correspondence is only as trustworthy as the triangle it landed on,
-    // # so require all three of its vertices to be flagged valid.
-    const float flag = std::min({(*_inTargetFlags)[i0], (*_inTargetFlags)[i1],
-                                 (*_inTargetFlags)[i2]});
-    (*_ioCorrespondingFlags)[i] = (flag > _flagThreshold) ? 1.0f : 0.0f;
+    // # Same correspondence expressed as affinity, for the symmetric filter.
+    affinityElements.push_back(Triplet(i, i0, bestU));
+    affinityElements.push_back(Triplet(i, i1, bestV));
+    affinityElements.push_back(Triplet(i, i2, bestW));
+    resolved[i] = true;
   }
+
+  // # Carry over the blended rows for floating vertices that found no triangle.
+  for (int k = 0; k < _affinity.outerSize(); k++) {
+    for (SparseMat::InnerIterator it(_affinity, k); it; ++it) {
+      if (!resolved[it.row()]) {
+        affinityElements.push_back(Triplet(it.row(), it.col(), it.value()));
+      }
+    }
+  }
+  _affinity.setZero();
+  _affinity.setFromTriplets(affinityElements.begin(), affinityElements.end());
 }
 
 void CorrespondenceFilter::_update_affinity() {
@@ -372,18 +411,23 @@ void CorrespondenceFilter::update() {
       // ### Restore the affinity matrix
       _affinity = affinityCopy;
     }
-
-    // ## Refine the blended correspondences into closest points on the target
-    // ## surface, which does not depend on how the target was tessellated.
-    if (_inTargetFaces != NULL && !_vertexFaceOffsets.empty()) {
-      _update_point_to_surface_correspondences();
-    }
   } else {
     /*
     affinity is computed and get be requested from the filter, but output
     correspondences are not generated if the filter doesn't know where to write
     the output.
     */
+  }
+
+  // # Refine the blended correspondences into closest points on the target
+  // # surface, which does not depend on how the target was tessellated.
+  //
+  // # This runs outside the block above because it also rewrites the affinity,
+  // # and SymmetricCorrespondenceFilter drives its push and pull sub-filters
+  // # with no output attached -- it consumes get_affinity() alone. Leaving this
+  // # inside would silently skip point-to-surface for symmetric registrations.
+  if (_inTargetFaces != NULL && !_vertexFaceOffsets.empty()) {
+    _update_point_to_surface_correspondences();
   }
 } // end wkkn_correspondences()
 

@@ -73,6 +73,21 @@ public:
     _inFloatingAreas = inFloatingAreas;
     _inTargetAreas = inTargetAreas;
   }
+  // Connectivity for both meshes, enabling point-to-surface correspondences in
+  // both directions. The roles swap for the pull filter, which searches the
+  // target in the floating set, so it receives the floating faces as *its*
+  // target connectivity. Must follow set_floating_input/set_target_input, which
+  // is what the sub-filters build their adjacency over. NULL for either keeps
+  // that direction on blended-vertex correspondences.
+  void set_faces(const FacesMat *const inFloatingFaces,
+                 const FacesMat *const inTargetFaces) {
+    if (inTargetFaces != NULL) {
+      _pushFilter.set_target_faces(inTargetFaces);
+    }
+    if (inFloatingFaces != NULL) {
+      _pullFilter.set_target_faces(inFloatingFaces);
+    }
+  }
   void update();
 
 protected:
