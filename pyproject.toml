@@ -1,5 +1,10 @@
 [build-system]
-requires = ["scikit-build-core>=0.8", "nanobind>=2.0", "cmake>=3.26"]
+# nanobind is capped below 3: in 3.x the first parameter of
+# nb::detail::exception_new changed from PyObject* to nb_internals*, so
+# bindings.cpp no longer compiles. Verified 2026-09-03 -- 3.0.1 fails, 2.4.0
+# builds clean. Without the cap an isolated build environment resolves to the
+# latest release and a clean checkout cannot be built at all.
+requires = ["scikit-build-core>=0.8", "nanobind>=2.0,<3", "cmake>=3.26"]
 build-backend = "scikit_build_core.build"
 
 [project]
