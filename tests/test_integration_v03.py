@@ -39,11 +39,12 @@ def test_pyproject_toml_is_valid_toml():
     tomllib.loads(content)  # raises on invalid TOML
 
 
-def test_pyproject_version_is_v03():
-    """Version must be 0.3.x (dev, rc, or final)."""
+def test_pyproject_version_is_v03_or_later():
+    """Version must be 0.3.x or later (the gfacchi-dev fork releases 0.4.x)."""
     content = tomllib.loads((ROOT / "pyproject.toml").read_text())
     version = content["project"]["version"]
-    assert version.startswith("0.3."), f"Expected 0.3.x, got {version!r}"
+    major, minor = (int(part) for part in version.split(".")[:2])
+    assert (major, minor) >= (0, 3), f"Expected 0.3.x or later, got {version!r}"
 
 
 def test_pyproject_has_cibuildwheel_config():
@@ -171,23 +172,24 @@ def test_release_yml_is_valid_yaml():
     yaml.safe_load(content)  # raises on invalid YAML
 
 
-def test_release_yml_has_trusted_publisher_permissions():
-    """release.yml must have id-token: write and contents: write."""
+def test_release_yml_publishes_github_release_only():
+    """The fork publishes to GitHub Releases: contents: write, no OIDC PyPI upload."""
     content = (ROOT / ".github/workflows/release.yml").read_text()
-    assert "id-token: write" in content
     assert "contents: write" in content
+    assert "gh release create" in content
+    assert "id-token: write" not in content
 
 
-def test_release_yml_has_pypi_environment():
-    """release.yml must reference pypi-release environment."""
+def test_release_yml_has_no_pypi_environment():
+    """The fork must not publish to PyPI: the meshmonk name belongs to upstream."""
     content = (ROOT / ".github/workflows/release.yml").read_text()
-    assert "pypi-release" in content
+    assert "environment: pypi-release" not in content
 
 
-def test_release_yml_has_testpypi_environment():
-    """release.yml must reference testpypi-release environment."""
+def test_release_yml_has_no_testpypi_environment():
+    """The fork must not publish to TestPyPI either."""
     content = (ROOT / ".github/workflows/release.yml").read_text()
-    assert "testpypi-release" in content
+    assert "testpypi-release" not in content
 
 
 def test_release_yml_has_workflow_dispatch():
@@ -216,10 +218,10 @@ def test_release_yml_references_cibuildwheel():
     assert "cibuildwheel" in content, "release.yml does not reference cibuildwheel"
 
 
-def test_release_yml_uses_pypi_publish_action():
-    """release.yml must use pypa/gh-action-pypi-publish for uploads."""
+def test_release_yml_does_not_use_pypi_publish_action():
+    """The fork attaches wheels to a GitHub Release instead of uploading to PyPI."""
     content = (ROOT / ".github/workflows/release.yml").read_text()
-    assert "pypa/gh-action-pypi-publish" in content
+    assert "pypa/gh-action-pypi-publish" not in content
 
 
 # ---------------------------------------------------------------------------
@@ -250,11 +252,12 @@ def test_init_py_no_hardcoded_version():
 
 
 def test_pyproject_version_is_consistent_with_v03_branch():
-    """pyproject.toml version must be 0.3.x, consistent with __init__.py fallback being 0.0.0.dev0."""
+    """pyproject.toml version must be 0.3.x or later, consistent with __init__.py fallback being 0.0.0.dev0."""
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
     version = pyproject["project"]["version"]
-    # Must be 0.3.x (not stuck at 0.2.x)
-    assert version.startswith("0.3."), f"pyproject.toml still at old version: {version}"
+    # Must be 0.3.x or later (not stuck at 0.2.x)
+    major, minor = (int(part) for part in version.split(".")[:2])
+    assert (major, minor) >= (0, 3), f"pyproject.toml still at old version: {version}"
     # __init__.py fallback must NOT be the release version (that would be dual-maintenance)
     init_content = (ROOT / "meshmonk/__init__.py").read_text()
     assert (

@@ -230,26 +230,19 @@ def test_release_yml_workflow_level_permissions_empty():
         ), "contents: write must NOT be at workflow level"
 
 
-def test_release_yml_publish_testpypi_has_id_token():
-    """publish-testpypi job must have id-token: write permission."""
+def test_release_yml_has_no_publish_testpypi_job():
+    """The fork has no TestPyPI publish job (the meshmonk name belongs to upstream)."""
     content = (ROOT / ".github/workflows/release.yml").read_text()
     parsed = yaml.safe_load(content)
-    job = parsed["jobs"]["publish-testpypi"]
-    perms = job.get("permissions", {})
-    assert (
-        perms.get("id-token") == "write"
-    ), "publish-testpypi job missing id-token: write permission"
+    assert "publish-testpypi" not in parsed["jobs"]
 
 
-def test_release_yml_publish_pypi_has_id_token():
-    """publish-pypi job must have id-token: write permission."""
+def test_release_yml_has_no_publish_pypi_job():
+    """The fork has no PyPI publish job; releases go to GitHub Releases."""
     content = (ROOT / ".github/workflows/release.yml").read_text()
     parsed = yaml.safe_load(content)
-    job = parsed["jobs"]["publish-pypi"]
-    perms = job.get("permissions", {})
-    assert (
-        perms.get("id-token") == "write"
-    ), "publish-pypi job missing id-token: write permission"
+    assert "publish-pypi" not in parsed["jobs"]
+    assert "create-release" in parsed["jobs"]
 
 
 def test_release_yml_create_release_has_contents_write():
