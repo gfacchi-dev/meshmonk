@@ -1,5 +1,14 @@
 # MeshMonk: High-Performance 3D Mesh Registration
 
+> **Fork of [jsnyde0/meshmonk](https://github.com/jsnyde0/meshmonk)** maintained for
+> [AutoFaceMonker](https://github.com/gfacchi-dev/AutoFaceMonker). It adds
+> point-to-surface correspondences (`correspondences_symmetric=False`), which make
+> nonrigid registration independent of target mesh sampling — see
+> [CHANGELOG 0.4.0](CHANGELOG.md). Install this fork with
+> `pip install "meshmonk[io] @ git+https://github.com/gfacchi-dev/meshmonk.git@v0.4.0"`
+> (builds from source; needs CMake and a C++20 compiler) or a prebuilt wheel from
+> [Releases](https://github.com/gfacchi-dev/meshmonk/releases).
+
 > **MATLAB users:** The MATLAB MEX interface has been removed from this repository as part of the Python-first rewrite.
 > For MATLAB support, use the KU Leuven MIRC fork at https://gitlab.kuleuven.be/mirc/meshmonk
 
@@ -23,7 +32,7 @@ pip install 'meshmonk[io]'
 **From source** (for development):
 
 ```bash
-git clone https://github.com/jsnyde0/meshmonk.git
+git clone https://github.com/gfacchi-dev/meshmonk.git
 cd meshmonk
 uv pip install --system '.[io]'
 ```

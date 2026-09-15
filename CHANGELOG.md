@@ -15,6 +15,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.4.0] — 2026-09-15 (fork: gfacchi-dev/meshmonk)
+
+Fork release used by AutoFaceMonker. Not published to PyPI: the `meshmonk`
+name belongs to upstream, so wheels ship as GitHub Release assets.
+
+### Added
+
+- Point-to-surface correspondences on the non-symmetric path. With
+  `correspondences_symmetric=False` and target faces supplied, each floating
+  vertex corresponds to the closest point on the target *surface* instead of
+  a distance-weighted blend of nearby target vertices. A triangle is the same
+  surface however finely it is tessellated, so correspondences no longer
+  depend on target sampling. Measured on the AppValidation study (1016 scans,
+  5 facial scanners): re-tessellating targets moved the registered template by
+  0.63 mm on average under the blended rule (1.04 mm on smartphone
+  photogrammetry) and by 0.15 mm under point-to-surface.
+- Trade-off: the push-only rule lets the template slide off thin structures.
+  On LAFAS it displaces four ear landmarks by 3.5–9.9 mm. A bidirectional
+  variant (branch `point-to-surface-symmetric`) restores the ears but recovers
+  only half the sampling invariance (0.42 mm) and is not adopted. The
+  symmetric correspondence path is unchanged.
+
+### Changed
+
+- Build: cap `nanobind` below 3.x. nanobind 3 changed
+  `nb::detail::exception_new`, so a clean checkout no longer compiled.
+- Release workflow: PyPI and TestPyPI publish jobs removed for this fork;
+  tagged releases build the wheel matrix and attach it to a GitHub Release.
+
+### Internal
+
+- Area-weighted affinity is implemented but disabled (negative result).
+
+---
+
 ## [0.3.0] — 2026-05-07
 
 First PyPI-ready release. `pip install meshmonk` works globally.

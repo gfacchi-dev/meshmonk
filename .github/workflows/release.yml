@@ -126,73 +126,9 @@ jobs:
       - name: Run tests
         run: pytest tests/ -q --ignore=tests/test_golden.py --ignore=tests/test_silent_logger.py --ignore=tests/test_profiling_driver_748_4.py --ignore=tests/utils
 
-  # ---------------------------------------------------------------------------
-  # Job 4: publish-testpypi
-  # ---------------------------------------------------------------------------
-  publish-testpypi:
-    name: Publish to TestPyPI
-    needs: [build-wheels, build-sdist, test-sdist]
-    runs-on: ubuntu-latest
-    environment: testpypi-release
-    permissions:
-      id-token: write
+  # PyPI/TestPyPI publishing removed in this fork: the `meshmonk` name belongs
+  # to upstream. Tagged releases attach the wheels to a GitHub Release instead.
 
-    if: >-
-      (github.event_name == 'workflow_dispatch' && inputs.publish_target == 'testpypi') ||
-      (github.event_name == 'push' && (contains(github.ref, 'rc') || contains(github.ref, 'dev')))
-
-    steps:
-      - name: Download wheels artifacts
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
-        with:
-          pattern: wheels-*
-          merge-multiple: true
-          path: dist/
-
-      - name: Download sdist artifact
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
-        with:
-          name: sdist
-          path: dist/
-
-      - name: Publish to TestPyPI
-        uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc  # v1.12.4
-        with:
-          repository-url: https://test.pypi.org/legacy/
-
-  # ---------------------------------------------------------------------------
-  # Job 5: publish-pypi
-  # ---------------------------------------------------------------------------
-  publish-pypi:
-    name: Publish to PyPI
-    needs: [build-wheels, build-sdist, test-sdist]
-    runs-on: ubuntu-latest
-    environment: pypi-release
-    permissions:
-      id-token: write
-
-    if: >-
-      github.event_name == 'push' &&
-      startsWith(github.ref, 'refs/tags/v') &&
-      !contains(github.ref, 'rc') &&
-      !contains(github.ref, 'dev')
-
-    steps:
-      - name: Download wheels artifacts
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
-        with:
-          pattern: wheels-*
-          merge-multiple: true
-          path: dist/
-
-      - name: Download sdist artifact
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
-        with:
-          name: sdist
-          path: dist/
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc  # v1.12.4
 
   # ---------------------------------------------------------------------------
   # Job 6: create-release

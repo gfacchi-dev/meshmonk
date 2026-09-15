@@ -70,8 +70,8 @@ void NonrigidRegistration::update() {
   // # floating ones are taken from its starting pose.
   VecDynFloat floatingAreas;
   VecDynFloat targetAreas;
-  // Disabled on this branch so the point-to-surface experiment is measured on
-  // its own rather than on top of area weighting.
+  // Area-weighted affinity stays off: it was a negative result, and the
+  // point-to-surface correspondences below were validated without it.
   const bool useAreaWeighting = false;
   if (useAreaWeighting) {
     floatingAreas = compute_vertex_areas(*_ioFloatingFeatures, *_inFloatingFaces);
