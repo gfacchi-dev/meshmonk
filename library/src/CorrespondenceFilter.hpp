@@ -8,6 +8,7 @@
 #include <Eigen/Dense>
 #include <Eigen/SparseCore>
 #include <stdio.h>
+#include <vector>
 
 typedef Eigen::VectorXf VecDynFloat;
 typedef Eigen::Matrix<float, Eigen::Dynamic, registration::NUM_FEATURES>
@@ -59,6 +60,20 @@ public:
   SparseMat get_affinity() const { return _affinity; }
   void set_parameters(const size_t numNeighbours, const float flagThreshold);
   void set_affinity_normalization(const bool normalizeAffinity = true);
+  // Per-vertex surface areas of the *source* set (the points being searched
+  // over, i.e. the target input). When set, each neighbour contributes in
+  // proportion to the surface area it represents instead of counting once,
+  // making the affinity independent of how densely that surface happens to be
+  // sampled. NULL keeps the original point-count behaviour.
+  void set_source_areas(const VecDynFloat *const inSourceAreas) {
+    _inSourceAreas = inSourceAreas;
+  }
+  // Target connectivity. When supplied, each floating vertex corresponds to the
+  // closest point on the target *surface* rather than to a distance-weighted
+  // blend of nearby target vertices. A triangle is the same surface however
+  // finely it is tessellated, so this makes correspondences independent of
+  // target sampling by construction. NULL keeps the blended-vertex behaviour.
+  void set_target_faces(const FacesMat *const inTargetFaces);
   void update();
 
 protected:
@@ -70,6 +85,19 @@ private:
   size_t _numAffinityElements = 0;
   // # Normalize affinity matrix
   bool _normalizeAffinity = true;
+  // # Optional per-source-vertex surface areas (NULL = unweighted)
+  const VecDynFloat *_inSourceAreas = NULL;
+
+  // # Optional target connectivity for point-to-surface correspondences,
+  // # with a vertex -> incident faces adjacency in CSR form so the candidate
+  // # triangles around a nearest vertex can be gathered without a search.
+  const FacesMat *_inTargetFaces = NULL;
+  std::vector<int> _vertexFaceOffsets; // size numTargetVertices + 1
+  std::vector<int> _vertexFaceIndices; // face ids, grouped by vertex
+  void _build_vertex_face_adjacency();
+  // ## Closest point on the target surface, searching triangles incident to
+  // ## the already-found nearest vertices.
+  void _update_point_to_surface_correspondences();
 
   // # Internal Functions
   // ## Function to update the sparse affinity matrix

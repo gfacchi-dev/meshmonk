@@ -28,6 +28,11 @@ namespace registration {
 
 void fuse_affinities(SparseMat &ioAffinity1, const SparseMat &inAffinity2);
 
+VecDynFloat compute_vertex_areas(const FeatureMat &inFeatures,
+                                 const FacesMat &inFaces);
+
+void scale_sparse_matrix_rows(SparseMat &ioMat, const VecDynFloat &inRowScale);
+
 void normalize_sparse_matrix(SparseMat &ioMat);
 
 template <typename VecMatType>
